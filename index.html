@@ -33,6 +33,9 @@ button { cursor:pointer; background:#4f8cff; color:#fff; font-weight:bold; borde
 const $ = s=>document.querySelector(s);
 const log = msg=>{ const d=document.createElement('div'); d.textContent=msg; $('#log').appendChild(d); }
 
+// قاعدة عنوان واجهة البرمجة: تدعم الفتح عبر file:// مباشرةً
+const API_BASE = (location && (location.protocol === 'file:' || location.origin === 'null')) ? 'http://localhost:3000' : '';
+
 // دالة توليد hash مبسط (SHA-256)
 async function generateHash(fileArrayBuffer){
     const hashBuffer = await crypto.subtle.digest('SHA-256', fileArrayBuffer);
@@ -64,9 +67,16 @@ async function uploadStamped(blob, originalName, hash){
     const stampedFile = new File([blob], 'original-'+originalName, { type: 'application/pdf' });
     form.append('file', stampedFile);
     form.append('hash', hash);
-    const res = await fetch('/upload', { method: 'POST', body: form });
+    let res;
+    try {
+        res = await fetch((API_BASE || '') + '/upload', { method: 'POST', body: form });
+    } catch (networkErr) {
+        throw new Error('تعذر الاتصال بالخادم. تأكد أن الخادم يعمل على ' + (API_BASE || window.location.origin));
+    }
     if(!res.ok){
-        throw new Error('رفع غير ناجح');
+        let detail = '';
+        try { const j = await res.json(); detail = j && j.message ? ' - ' + j.message : ''; } catch(_) {}
+        throw new Error('رفع غير ناجح' + detail);
     }
     return await res.json();
 }
@@ -93,14 +103,15 @@ $('#processBtn').addEventListener('click', async ()=>{
         log('✅ تم رفع الملف كاملاً: ' + result.fileName);
         if (result.path) {
             const view = document.createElement('a');
-            view.href = result.path;
+            view.href = (API_BASE || '') + result.path;
             view.target = '_blank';
             view.textContent = 'عرض الملف المرفوع على الخادم';
             $('#log').appendChild(document.createElement('br'));
             $('#log').appendChild(view);
         }
         // بعد نجاح الرفع، ولضمان أن QR يشير إلى نسخة الخادم
-        renderQR(window.location.origin + '/file?hash=' + hash);
+        const qrBase = (API_BASE && API_BASE.length) ? API_BASE : window.location.origin;
+        renderQR(qrBase + '/file?hash=' + hash);
     } catch(e){
         log('❌ فشل رفع الملف: ' + (e && e.message ? e.message : e));
     }
