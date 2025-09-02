@@ -26,7 +26,7 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-// قاعدة بيانات مؤقتة
+// قاعدة بيانات مؤقتة: ربط hash باسم الملف المرفوع
 const reports = {
   "123abc": { fileName: "report1.pdf", status: "أصلي" }
 };
@@ -66,6 +66,27 @@ app.post('/upload', upload.single('file'), (req, res) => {
     console.error('Upload error:', error);
     return res.status(500).json({ ok: false, message: 'خطأ أثناء الرفع' });
   }
+});
+
+// مسار لعرض الملف كاملاً عند المسح (QR)
+// مثال: /file?hash=abcdef
+app.get('/file', (req, res) => {
+  const hash = req.query.hash;
+  if (!hash) {
+    return res.status(400).send('❌ لا يوجد hash');
+  }
+  const report = reports[hash];
+  if (!report) {
+    return res.status(404).send('❌ لم يتم العثور على ملف مرتبط بهذا الهاش');
+  }
+  const filePath = path.join(uploadsDirPath, report.fileName);
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).send('❌ الملف غير موجود على الخادم');
+  }
+  res.setHeader('Content-Type', 'application/pdf');
+  // inline العرض داخل المتصفح
+  res.setHeader('Content-Disposition', `inline; filename="${report.fileName}"`);
+  fs.createReadStream(filePath).pipe(res);
 });
 
 app.listen(port, () => console.log(`Server running at http://localhost:${port}`));

@@ -77,7 +77,6 @@ $('#processBtn').addEventListener('click', async ()=>{
     const file = fileInput.files[0];
     const arrayBuffer = await file.arrayBuffer();
     const hash = await generateHash(arrayBuffer);
-    renderQR(window.location.origin + '/verify?hash=' + hash);
     
     const stampedBytes = await stampPDF(arrayBuffer, hash);
     const blob = new Blob([stampedBytes], {type:'application/pdf'});
@@ -100,6 +99,8 @@ $('#processBtn').addEventListener('click', async ()=>{
             $('#log').appendChild(document.createElement('br'));
             $('#log').appendChild(view);
         }
+        // بعد نجاح الرفع، ولضمان أن QR يشير إلى نسخة الخادم
+        renderQR(window.location.origin + '/file?hash=' + hash);
     } catch(e){
         log('❌ فشل رفع الملف: ' + (e && e.message ? e.message : e));
     }
