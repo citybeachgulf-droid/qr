@@ -180,10 +180,12 @@ async function stampPDF(pdfBytes, hash){
     }
     const qrWidth = 100;
     const qrHeight = 100;
-    pages.forEach(p=>{
+    pages.forEach((p, pageIndex)=>{
         p.drawText('نسخة أصلية للبنك', { x:20, y:20, size:12, font });
         p.drawText('Hash:'+hash.slice(0,10)+'...', { x:20, y:35, size:8, font });
-        p.drawImage(qrImage, { x: p.getWidth() - qrWidth - 20, y: 20, width: qrWidth, height: qrHeight });
+        if (pageIndex === 0) {
+            p.drawImage(qrImage, { x: p.getWidth() - qrWidth - 20, y: 20, width: qrWidth, height: qrHeight });
+        }
     });
     return await pdfDoc.save();
 }
@@ -264,9 +266,11 @@ $('#processBtn').addEventListener('click', async ()=>{
     }
     const qrW = 90;
     const qrH = 90;
-    pages.forEach(p=>{
+    pages.forEach((p, pageIndex)=>{
         p.drawText('نسخة للعميل – غير أصلية', { x:50, y:50, size:20, font, color:PDFLib.rgb(0.8,0.8,0.8), rotate:PDFLib.degrees(45) });
-        p.drawImage(qrImageClient, { x: p.getWidth() - qrW - 20, y: 20, width: qrW, height: qrH });
+        if (pageIndex === 0) {
+            p.drawImage(qrImageClient, { x: p.getWidth() - qrW - 20, y: 20, width: qrW, height: qrH });
+        }
     });
     const clientBytes = await clientPdfDoc.save();
     const blobClient = new Blob([clientBytes], {type:'application/pdf'});
