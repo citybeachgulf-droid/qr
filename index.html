@@ -5,11 +5,29 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>نظام ختم وتحقق التقارير</title>
 <style>
-body { font-family: Arial, sans-serif; background:#f5f6fa; color:#111; padding:20px; }
-.card { background:#fff; padding:20px; border-radius:12px; margin-bottom:20px; box-shadow:0 5px 15px rgba(0,0,0,.1); }
-input, button { padding:10px; margin:5px 0; width:100%; border-radius:8px; border:1px solid #ccc; }
-button { cursor:pointer; background:#4f8cff; color:#fff; font-weight:bold; border:none; }
-#qrBox { margin-top:10px; }
+body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Kufi Arabic", "Noto Sans Arabic", Arial, "Amiri", sans-serif; background:radial-gradient(1200px 600px at 100% -10%, #dbeafe 0%, transparent 50%), linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%); color:#0f172a; padding:20px; line-height:1.6; }
+.container { max-width:900px; margin:0 auto; }
+.header { text-align:center; margin:10px 0 20px; }
+.header h1 { margin:0; font-size:26px; color:#0b1220; }
+.header .subtitle { margin:6px 0 0; color:#475569; font-size:14px; }
+.card { background:#ffffff; padding:20px; border-radius:14px; margin-bottom:18px; box-shadow:0 8px 24px rgba(15,23,42,0.08); border:1px solid rgba(2,6,23,0.06); }
+input[type=file] { padding:10px; margin:6px 0 10px; width:100%; border-radius:10px; border:1px solid #cbd5e1; background:#f8fafc; color:#0f172a; transition:box-shadow .2s ease, border-color .2s ease, background .2s ease; }
+input[type=file]:focus { outline:none; border-color:#6366f1; box-shadow:0 0 0 4px rgba(99,102,241,0.15); background:#ffffff; }
+input[type=file]::file-selector-button { margin-inline-end:12px; padding:10px 14px; border:none; border-radius:8px; background:#4f46e5; color:#fff; font-weight:600; cursor:pointer; transition:filter .2s ease, transform .02s ease; }
+input[type=file]::file-selector-button:hover { filter:brightness(0.95); }
+input[type=file]::file-selector-button:active { transform:translateY(1px); }
+.btn { display:inline-flex; align-items:center; justify-content:center; width:100%; padding:12px 14px; border-radius:10px; border:1px solid transparent; background:#4f46e5; color:#fff; font-weight:700; letter-spacing:.2px; cursor:pointer; transition:box-shadow .2s ease, transform .02s ease, filter .2s ease, background .2s ease; text-decoration:none; }
+.btn:hover { filter:brightness(0.98); box-shadow:0 10px 20px rgba(79,70,229,0.18); }
+.btn:active { transform:translateY(1px); }
+.btn:focus-visible { outline:none; box-shadow:0 0 0 4px rgba(99,102,241,0.25); }
+.btn:disabled { cursor:not-allowed; background:#818cf8; opacity:0.85; box-shadow:none; }
+.btn.is-loading { position:relative; }
+.btn.is-loading:before { content:""; width:16px; height:16px; border-radius:999px; border:2px solid rgba(255,255,255,0.55); border-top-color:#fff; animation:btnspin 1s linear infinite; position:absolute; inset-inline-start:12px; top:50%; transform:translateY(-50%); }
+@keyframes btnspin { to { transform:translateY(-50%) rotate(360deg); } }
+#qrBox { margin-top:10px; display:flex; align-items:center; justify-content:center; min-height:160px; background:linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%); border:1px dashed #cbd5e1; border-radius:12px; padding:12px; }
+#log { margin-top:8px; font-size:14px; color:#0f172a; }
+#log a { display:inline-block; margin-top:8px; color:#2563eb; text-decoration:none; font-weight:600; }
+#log a:hover { text-decoration:underline; }
 </style>
 <!-- مكتبات -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -23,16 +41,23 @@ if (typeof QRCode === 'undefined') {
 </head>
 <body>
 
+<div class="container">
+<div class="header">
+<h1>نظام ختم وتحقق التقارير</h1>
+<p class="subtitle">ارفع ملف PDF ليتم ختمه وتوليد رمز QR.</p>
+</div>
+
 <div class="card">
 <h2>رفع التقرير</h2>
 <input type="file" id="pdfFile" accept="application/pdf">
-<button id="processBtn">توليد النسخ وQR</button>
-<div id="log"></div>
+<button id="processBtn" class="btn">توليد النسخ وQR</button>
+<div id="log" class="log"></div>
 </div>
 
 <div class="card">
 <h2>QR Code</h2>
 <div id="qrBox"></div>
+</div>
 </div>
 
 <script>
