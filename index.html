@@ -58,13 +58,26 @@ async function stampPDF(pdfBytes, hash){
     return await pdfDoc.save();
 }
 
+// رفع الملف المختوم كاملاً إلى الخادم
+async function uploadStamped(blob, originalName, hash){
+    const form = new FormData();
+    const stampedFile = new File([blob], 'original-'+originalName, { type: 'application/pdf' });
+    form.append('file', stampedFile);
+    form.append('hash', hash);
+    const res = await fetch('/upload', { method: 'POST', body: form });
+    if(!res.ok){
+        throw new Error('رفع غير ناجح');
+    }
+    return await res.json();
+}
+
 $('#processBtn').addEventListener('click', async ()=>{
     const fileInput = $('#pdfFile');
     if(!fileInput.files.length){ alert('اختر ملف PDF'); return; }
     const file = fileInput.files[0];
     const arrayBuffer = await file.arrayBuffer();
     const hash = await generateHash(arrayBuffer);
-    renderQR('https://yourserver.com/verify?hash='+hash); // الرابط للتحقق على سيرفرك
+    renderQR(window.location.origin + '/verify?hash=' + hash);
     
     const stampedBytes = await stampPDF(arrayBuffer, hash);
     const blob = new Blob([stampedBytes], {type:'application/pdf'});
@@ -73,6 +86,23 @@ $('#processBtn').addEventListener('click', async ()=>{
     a.download = 'original-'+file.name;
     a.textContent = 'تحميل النسخة الأصلية للبنك';
     $('#log').appendChild(a);
+
+    // رفع النسخة الأصلية المختومة كاملةً
+    log('⬆️ جاري رفع النسخة الأصلية إلى الخادم...');
+    try {
+        const result = await uploadStamped(blob, file.name, hash);
+        log('✅ تم رفع الملف كاملاً: ' + result.fileName);
+        if (result.path) {
+            const view = document.createElement('a');
+            view.href = result.path;
+            view.target = '_blank';
+            view.textContent = 'عرض الملف المرفوع على الخادم';
+            $('#log').appendChild(document.createElement('br'));
+            $('#log').appendChild(view);
+        }
+    } catch(e){
+        log('❌ فشل رفع الملف: ' + (e && e.message ? e.message : e));
+    }
 
     // نسخة للعميل بعلامة مائية
     const clientPdfDoc = await PDFLib.PDFDocument.load(arrayBuffer);
