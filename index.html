@@ -13,6 +13,11 @@ button { cursor:pointer; background:#4f8cff; color:#fff; font-weight:bold; borde
 </style>
 <!-- مكتبات -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script>
+if (typeof QRCode === 'undefined') {
+    document.write('<script src="https://unpkg.com/qrcodejs@1.0.0/qrcode.min.js"><\/script>');
+}
+</script>
 <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
 </head>
 <body>
@@ -46,8 +51,27 @@ async function generateHash(fileArrayBuffer){
 // توليد QR
 function renderQR(text){
     $('#qrBox').innerHTML='';
+    if (typeof QRCode === 'undefined') {
+        const a = document.createElement('a');
+        a.href = text;
+        a.textContent = 'فتح الرابط: ' + text;
+        $('#qrBox').appendChild(a);
+        return;
+    }
     new QRCode($('#qrBox'), { text, width:150, height:150 });
 }
+
+// إذا وُجد hash في عنوان الصفحة، اعرض QR فورًا
+(function preRenderFromQuery(){
+    try {
+        const u = new URL(window.location.href);
+        const hash = u.searchParams.get('hash');
+        if (hash) {
+            const qrBase = (API_BASE && API_BASE.length) ? API_BASE : window.location.origin;
+            renderQR(qrBase + '/verify?hash=' + hash);
+        }
+    } catch(_) {}
+})();
 
 // ختم PDF (بصمة ورمز QR)
 async function stampPDF(pdfBytes, hash){
@@ -87,7 +111,7 @@ $('#processBtn').addEventListener('click', async ()=>{
     const file = fileInput.files[0];
     const arrayBuffer = await file.arrayBuffer();
     const hash = await generateHash(arrayBuffer);
-    
+
     const stampedBytes = await stampPDF(arrayBuffer, hash);
     const blob = new Blob([stampedBytes], {type:'application/pdf'});
     const a = document.createElement('a');
@@ -95,6 +119,10 @@ $('#processBtn').addEventListener('click', async ()=>{
     a.download = 'original-'+file.name;
     a.textContent = 'تحميل النسخة الأصلية للبنك';
     $('#log').appendChild(a);
+
+    // عرض QR برابط التحقق مؤقتًا قبل الرفع
+    const qrBaseInitial = (API_BASE && API_BASE.length) ? API_BASE : window.location.origin;
+    renderQR(qrBaseInitial + '/verify?hash=' + hash);
 
     // رفع النسخة الأصلية المختومة كاملةً
     log('⬆️ جاري رفع النسخة الأصلية إلى الخادم...');
@@ -109,7 +137,7 @@ $('#processBtn').addEventListener('click', async ()=>{
             $('#log').appendChild(document.createElement('br'));
             $('#log').appendChild(view);
         }
-        // بعد نجاح الرفع، ولضمان أن QR يشير إلى نسخة الخادم
+        // بعد نجاح الرفع، حدِّث الـ QR ليشير إلى الملف على الخادم
         const qrBase = (API_BASE && API_BASE.length) ? API_BASE : window.location.origin;
         renderQR(qrBase + '/file?hash=' + hash);
     } catch(e){
