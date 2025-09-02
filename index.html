@@ -111,6 +111,45 @@ function renderQR(text){
     $('#qrBox').appendChild(img);
 }
 
+// توليد صورة QR كـ DataURL لاستخدامها داخل PDF
+async function generateQRDataUrl(text, size){
+    return await new Promise((resolve, reject)=>{
+        if (typeof QRCode === 'undefined') {
+            return reject(new Error('مكتبة QR غير متوفرة لتوليد الصورة'));
+        }
+        const container = document.createElement('div');
+        container.style.position = 'fixed';
+        container.style.left = '-9999px';
+        document.body.appendChild(container);
+        try {
+            // إنشاء QR داخل عنصر مخفي ثم استخراج الصورة
+            new QRCode(container, { text, width: size, height: size });
+            // امنح المكتبة دورة حدث لتكمل الرسم
+            setTimeout(()=>{
+                try {
+                    let dataUrl;
+                    const img = container.querySelector('img');
+                    const canvas = container.querySelector('canvas');
+                    if (img && img.src) {
+                        dataUrl = img.src;
+                    } else if (canvas) {
+                        dataUrl = canvas.toDataURL('image/png');
+                    }
+                    document.body.removeChild(container);
+                    if (!dataUrl) return reject(new Error('تعذر توليد صورة QR'));
+                    resolve(dataUrl);
+                } catch(err){
+                    document.body.removeChild(container);
+                    reject(err);
+                }
+            }, 0);
+        } catch(err){
+            document.body.removeChild(container);
+            reject(err);
+        }
+    });
+}
+
 // إذا وُجد hash في عنوان الصفحة، اعرض QR فورًا
 (function preRenderFromQuery(){
     try {
@@ -129,9 +168,22 @@ async function stampPDF(pdfBytes, hash){
     const pages = pdfDoc.getPages();
     pdfDoc.registerFontkit(fontkit);
     const font = await pdfDoc.embedFont(await getArabicFontBytes(), { subset: true });
+    // توليد QR يشير إلى صفحة التحقق
+    const qrBase = (API_BASE && API_BASE.length) ? API_BASE : window.location.origin;
+    const qrText = qrBase + '/verify?hash=' + hash;
+    const qrDataUrl = await generateQRDataUrl(qrText, 100);
+    let qrImage;
+    if (qrDataUrl.startsWith('data:image/png')) {
+        qrImage = await pdfDoc.embedPng(qrDataUrl);
+    } else {
+        qrImage = await pdfDoc.embedJpg(qrDataUrl);
+    }
+    const qrWidth = 100;
+    const qrHeight = 100;
     pages.forEach(p=>{
         p.drawText('نسخة أصلية للبنك', { x:20, y:20, size:12, font });
         p.drawText('Hash:'+hash.slice(0,10)+'...', { x:20, y:35, size:8, font });
+        p.drawImage(qrImage, { x: p.getWidth() - qrWidth - 20, y: 20, width: qrWidth, height: qrHeight });
     });
     return await pdfDoc.save();
 }
@@ -200,8 +252,21 @@ $('#processBtn').addEventListener('click', async ()=>{
     const pages = clientPdfDoc.getPages();
     clientPdfDoc.registerFontkit(fontkit);
     const font = await clientPdfDoc.embedFont(await getArabicFontBytes(), { subset: true });
+    // تضمين QR داخل نسخة العميل أيضًا
+    const qrBaseClient = (API_BASE && API_BASE.length) ? API_BASE : window.location.origin;
+    const qrTextClient = qrBaseClient + '/verify?hash=' + hash;
+    const qrDataUrlClient = await generateQRDataUrl(qrTextClient, 90);
+    let qrImageClient;
+    if (qrDataUrlClient.startsWith('data:image/png')) {
+        qrImageClient = await clientPdfDoc.embedPng(qrDataUrlClient);
+    } else {
+        qrImageClient = await clientPdfDoc.embedJpg(qrDataUrlClient);
+    }
+    const qrW = 90;
+    const qrH = 90;
     pages.forEach(p=>{
         p.drawText('نسخة للعميل – غير أصلية', { x:50, y:50, size:20, font, color:PDFLib.rgb(0.8,0.8,0.8), rotate:PDFLib.degrees(45) });
+        p.drawImage(qrImageClient, { x: p.getWidth() - qrW - 20, y: 20, width: qrW, height: qrH });
     });
     const clientBytes = await clientPdfDoc.save();
     const blobClient = new Blob([clientBytes], {type:'application/pdf'});
