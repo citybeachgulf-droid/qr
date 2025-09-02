@@ -168,9 +168,9 @@ async function stampPDF(pdfBytes, hash){
     const pages = pdfDoc.getPages();
     pdfDoc.registerFontkit(fontkit);
     const font = await pdfDoc.embedFont(await getArabicFontBytes(), { subset: true });
-    // توليد QR يشير إلى صفحة التحقق
+    // توليد QR يشير مباشرة لعرض الملف على الخادم
     const qrBase = (API_BASE && API_BASE.length) ? API_BASE : window.location.origin;
-    const qrText = qrBase + '/verify?hash=' + hash;
+    const qrText = qrBase + '/file?hash=' + hash;
     const qrDataUrl = await generateQRDataUrl(qrText, 100);
     let qrImage;
     if (qrDataUrl.startsWith('data:image/png')) {
@@ -254,7 +254,7 @@ $('#processBtn').addEventListener('click', async ()=>{
     const font = await clientPdfDoc.embedFont(await getArabicFontBytes(), { subset: true });
     // تضمين QR داخل نسخة العميل أيضًا
     const qrBaseClient = (API_BASE && API_BASE.length) ? API_BASE : window.location.origin;
-    const qrTextClient = qrBaseClient + '/verify?hash=' + hash;
+    const qrTextClient = qrBaseClient + '/file?hash=' + hash;
     const qrDataUrlClient = await generateQRDataUrl(qrTextClient, 90);
     let qrImageClient;
     if (qrDataUrlClient.startsWith('data:image/png')) {
