@@ -50,7 +50,8 @@ app.get('/verify', (req, res) => {
   const report = reports[hash];
   if(report){
     res.send(`<h2>✅ التقرير أصلي</h2>
-              <p>اسم الملف: ${report.fileName}</p>`);
+              <p>اسم الملف: ${report.fileName}</p>
+              <p><a href="/file?hash=${hash}" target="_blank">📄 عرض الملف</a></p>`);
   } else {
     res.send(`<h2>❌ هذا التقرير غير أصلي أو تم التعديل</h2>`);
   }
