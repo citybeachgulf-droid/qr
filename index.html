@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>نظام ختم وتحقق التقارير</title>
+<style>
+body { font-family: Arial, sans-serif; background:#f5f6fa; color:#111; padding:20px; }
+.card { background:#fff; padding:20px; border-radius:12px; margin-bottom:20px; box-shadow:0 5px 15px rgba(0,0,0,.1); }
+input, button { padding:10px; margin:5px 0; width:100%; border-radius:8px; border:1px solid #ccc; }
+button { cursor:pointer; background:#4f8cff; color:#fff; font-weight:bold; border:none; }
+#qrBox { margin-top:10px; }
+</style>
+<!-- مكتبات -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+</head>
+<body>
+
+<div class="card">
+<h2>رفع التقرير</h2>
+<input type="file" id="pdfFile" accept="application/pdf">
+<button id="processBtn">توليد النسخ وQR</button>
+<div id="log"></div>
+</div>
+
+<div class="card">
+<h2>QR Code</h2>
+<div id="qrBox"></div>
+</div>
+
+<script>
+const $ = s=>document.querySelector(s);
+const log = msg=>{ const d=document.createElement('div'); d.textContent=msg; $('#log').appendChild(d); }
+
+// دالة توليد hash مبسط (SHA-256)
+async function generateHash(fileArrayBuffer){
+    const hashBuffer = await crypto.subtle.digest('SHA-256', fileArrayBuffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+
+// توليد QR
+function renderQR(text){
+    $('#qrBox').innerHTML='';
+    new QRCode($('#qrBox'), { text, width:150, height:150 });
+}
+
+// ختم PDF (بصمة ورمز QR)
+async function stampPDF(pdfBytes, hash){
+    const pdfDoc = await PDFLib.PDFDocument.load(pdfBytes);
+    const pages = pdfDoc.getPages();
+    const font = await pdfDoc.embedFont(PDFLib.StandardFonts.Helvetica);
+    pages.forEach(p=>{
+        p.drawText('نسخة أصلية للبنك', { x:20, y:20, size:12, font });
+        p.drawText('Hash:'+hash.slice(0,10)+'...', { x:20, y:35, size:8, font });
+    });
+    return await pdfDoc.save();
+}
+
+$('#processBtn').addEventListener('click', async ()=>{
+    const fileInput = $('#pdfFile');
+    if(!fileInput.files.length){ alert('اختر ملف PDF'); return; }
+    const file = fileInput.files[0];
+    const arrayBuffer = await file.arrayBuffer();
+    const hash = await generateHash(arrayBuffer);
+    renderQR('https://yourserver.com/verify?hash='+hash); // الرابط للتحقق على سيرفرك
+    
+    const stampedBytes = await stampPDF(arrayBuffer, hash);
+    const blob = new Blob([stampedBytes], {type:'application/pdf'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'original-'+file.name;
+    a.textContent = 'تحميل النسخة الأصلية للبنك';
+    $('#log').appendChild(a);
+
+    // نسخة للعميل بعلامة مائية
+    const clientPdfDoc = await PDFLib.PDFDocument.load(arrayBuffer);
+    const pages = clientPdfDoc.getPages();
+    const font = await clientPdfDoc.embedFont(PDFLib.StandardFonts.Helvetica);
+    pages.forEach(p=>{
+        p.drawText('نسخة للعميل – غير أصلية', { x:50, y:50, size:20, font, color:PDFLib.rgb(0.8,0.8,0.8), rotate:PDFLib.degrees(45) });
+    });
+    const clientBytes = await clientPdfDoc.save();
+    const blobClient = new Blob([clientBytes], {type:'application/pdf'});
+    const a2 = document.createElement('a');
+    a2.href = URL.createObjectURL(blobClient);
+    a2.download = 'client-'+file.name;
+    a2.textContent = 'تحميل نسخة العميل';
+    $('#log').appendChild(document.createElement('br'));
+    $('#log').appendChild(a2);
+
+    log('✅ تم توليد النسخ وQR بنجاح.');
+});
+</script>
+
+</body>
+</html>
