@@ -51,14 +51,29 @@ async function generateHash(fileArrayBuffer){
 // توليد QR
 function renderQR(text){
     $('#qrBox').innerHTML='';
-    if (typeof QRCode === 'undefined') {
+    // المحاولة الأولى: مكتبة QRCode إن توفرت
+    if (typeof QRCode !== 'undefined') {
+        new QRCode($('#qrBox'), { text, width:150, height:150 });
+        return;
+    }
+    // المحاولة الثانية: توليد صورة QR من خدمة عامة
+    const img = document.createElement('img');
+    img.width = 150;
+    img.height = 150;
+    img.alt = 'QR';
+    img.onload = () => {
+        // تمت تهيئة الـ QR بنجاح عبر الخدمة
+    };
+    img.onerror = () => {
+        // المحاولة الثالثة: إظهار رابط فقط كحل أخير
+        $('#qrBox').innerHTML = '';
         const a = document.createElement('a');
         a.href = text;
         a.textContent = 'فتح الرابط: ' + text;
         $('#qrBox').appendChild(a);
-        return;
-    }
-    new QRCode($('#qrBox'), { text, width:150, height:150 });
+    };
+    img.src = 'https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=' + encodeURIComponent(text);
+    $('#qrBox').appendChild(img);
 }
 
 // إذا وُجد hash في عنوان الصفحة، اعرض QR فورًا
