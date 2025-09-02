@@ -5,6 +5,17 @@ const fs = require('fs');
 const app = express();
 const port = 3000;
 
+// Basic CORS for cross-origin requests
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+  next();
+});
+
 // static files (serve index.html and assets)
 app.use(express.static(__dirname));
 
