@@ -40,14 +40,35 @@ const $ = s=>document.querySelector(s);
 const log = msg=>{ const d=document.createElement('div'); d.textContent=msg; $('#log').appendChild(d); }
 
 // إعداد خط عربي مضمّن لاستخدامه داخل PDF
-const ARABIC_FONT_URL = 'https://cdn.jsdelivr.net/gh/aliftype/amiri@master/ttf/Amiri-Regular.ttf';
+// استخدم مسارًا محليًا مع رابط احتياطي لتفادي تعطل المصدر
+const LOCAL_ARABIC_FONT_URL = '/fonts/Amiri-Regular.ttf';
+const FALLBACK_ARABIC_FONT_URL = 'https://raw.githubusercontent.com/google/fonts/main/ofl/amiri/Amiri-Regular.ttf';
 let cachedArabicFontBytesPromise = null;
 async function getArabicFontBytes(){
     if(!cachedArabicFontBytesPromise){
-        cachedArabicFontBytesPromise = fetch(ARABIC_FONT_URL).then(r=>{
-            if(!r.ok) throw new Error('تعذر تحميل الخط العربي');
-            return r.arrayBuffer();
-        }).then(buf=>new Uint8Array(buf));
+        const tryUrls = [];
+        // في وضع file:// لا يعمل المسار النسبي عبر fetch، لذا استخدم الخادم المحلي عند توفره
+        if (location && (location.protocol !== 'file:' && location.origin !== 'null')) {
+            tryUrls.push(LOCAL_ARABIC_FONT_URL);
+        } else {
+            tryUrls.push('http://localhost:3000' + LOCAL_ARABIC_FONT_URL);
+        }
+        tryUrls.push(FALLBACK_ARABIC_FONT_URL);
+
+        cachedArabicFontBytesPromise = (async () => {
+            let lastErr;
+            for (const url of tryUrls) {
+                try {
+                    const r = await fetch(url);
+                    if(!r.ok) throw new Error('HTTP '+r.status);
+                    const buf = await r.arrayBuffer();
+                    return new Uint8Array(buf);
+                } catch (e) {
+                    lastErr = e;
+                }
+            }
+            throw new Error('تعذر تحميل الخط العربي');
+        })();
     }
     return await cachedArabicFontBytesPromise;
 }
