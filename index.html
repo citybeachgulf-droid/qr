@@ -98,8 +98,11 @@ async function getArabicFontBytes(){
     return await cachedArabicFontBytesPromise;
 }
 
-// قاعدة عنوان واجهة البرمجة: تدعم الفتح عبر file:// مباشرةً
-const API_BASE = (location && (location.protocol === 'file:' || location.origin === 'null')) ? 'http://localhost:3000' : '';
+// قاعدة عنوان واجهة البرمجة: تدعم الفتح عبر file:// مباشرةً، وتُجبِر الاتصال بخادم Node إن لم نكن على نفس الأصل
+const DEFAULT_API_BASE = 'http://localhost:3000';
+const isFileProtocol = location && (location.protocol === 'file:' || location.origin === 'null');
+const isNodeSameOrigin = location && (location.origin === 'http://localhost:3000' || location.origin === 'http://127.0.0.1:3000');
+const API_BASE = isFileProtocol ? DEFAULT_API_BASE : (isNodeSameOrigin ? '' : DEFAULT_API_BASE);
 
 // دالة توليد hash مبسط (SHA-256)
 async function generateHash(fileArrayBuffer){
