@@ -1,35 +1,17 @@
-## Backblaze B2 setup
+# PDF Uploader with QR ("التقرير كامل")
 
-1) Create a Backblaze B2 Application Key with access to your target bucket.
+## Run locally
 
-2) Copy `.env.example` to `.env` and fill values:
-
-```
-B2_ACCOUNT_ID=your_key_id
-B2_APPLICATION_KEY=your_application_key
-# Provide at least one of these
-B2_BUCKET_NAME=your_bucket_name
-# or
-B2_BUCKET_ID=your_bucket_id
-
-# Optional override for public base URL (rarely needed)
-# B2_PUBLIC_BASE_URL=https://f000.backblazeb2.com
-
-PORT=3000
+```bash
+pip install -r requirements.txt
+uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-Notes
-- If you only know the bucket name, the server will resolve its ID automatically after authorization.
-- Fallback env names supported for compatibility: `B2_APPLICATION_KEY_ID`, `B2_KEY_ID`, `B2_APP_KEY`.
+Open http://localhost:8000 and upload a PDF. The processed file will be available under `/files/...`.
 
-Run
+## API
 
-```
-npm install
-node server.js
-```
-
-Test upload
-- Open `http://localhost:3000/` and upload a file.
-- If env is missing or invalid, the API returns: "خدمة التخزين غير مهيأة...". Ensure the `.env` is present and correct.
+- POST `/upload-pdf`: multipart form field `file` (PDF). Returns JSON with `download_url`.
+- GET `/files/{filename}`: serves processed PDFs.
+- GET `/healthz`: health check.
 
