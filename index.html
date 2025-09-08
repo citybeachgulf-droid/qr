@@ -259,15 +259,16 @@ $('#processBtn').addEventListener('click', async ()=>{
     try {
         const result = await uploadStamped(blob, file.name, hash);
         log('✅ تم رفع الملف كاملاً: ' + result.fileName);
-        if (result.path) {
+        // إن توفر رابط مباشر على Backblaze فاعرضه مباشرةً
+        if (result && result.url) {
             const view = document.createElement('a');
-            view.href = (API_BASE || '') + result.path;
+            view.href = result.url;
             view.target = '_blank';
-            view.textContent = 'عرض الملف المرفوع على الخادم';
+            view.textContent = 'عرض الملف المرفوع (رابط دائم)';
             $('#log').appendChild(document.createElement('br'));
             $('#log').appendChild(view);
         }
-        // بعد نجاح الرفع، حدِّث الـ QR ليشير إلى الملف على الخادم
+        // بعد نجاح الرفع، حدِّث الـ QR ليشير إلى مسار /file (سيوجه إلى الرابط الدائم)
         const qrBase = (API_BASE && API_BASE.length) ? API_BASE : window.location.origin;
         renderQR(qrBase + '/file?hash=' + hash);
     } catch(e){
