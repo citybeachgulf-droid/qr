@@ -266,8 +266,10 @@ $('#processBtn').addEventListener('click', async ()=>{
     const targetName = 'original-' + file.name;
     let qrB2Url = '';
     if (cfg && cfg.b2Enabled && cfg.b2PublicBaseUrl && cfg.b2BucketName) {
-        // يجب ترميز اسم الملف في الرابط
-        qrB2Url = cfg.b2PublicBaseUrl.replace(/\/$/, '') + '/file/' + encodeURIComponent(cfg.b2BucketName) + '/' + encodeURIComponent(targetName);
+        // ترميز كل جزء من اسم الملف مع الحفاظ على الشرطة المائلة كفواصل مسارات
+        const safeBucket = encodeURIComponent(cfg.b2BucketName);
+        const safePath = String(targetName).split('/').map(seg => encodeURIComponent(seg)).join('/');
+        qrB2Url = cfg.b2PublicBaseUrl.replace(/\/$/, '') + '/file/' + safeBucket + '/' + safePath;
     }
 
     const stampedBytes = await stampPDF(arrayBuffer, hash, qrB2Url || null);
