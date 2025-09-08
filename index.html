@@ -101,6 +101,23 @@ async function getArabicFontBytes(){
 // قاعدة عنوان واجهة البرمجة: تدعم الفتح عبر file:// مباشرةً
 const API_BASE = (location && (location.protocol === 'file:' || location.origin === 'null')) ? 'http://localhost:3000' : '';
 
+// جلب إعدادات الخادم (B2)
+let serverConfigPromise = null;
+async function getServerConfig(){
+    if(!serverConfigPromise){
+        serverConfigPromise = (async () => {
+            try {
+                const r = await fetch((API_BASE || '') + '/config');
+                if(!r.ok) throw new Error('config http '+r.status);
+                return await r.json();
+            } catch(_) {
+                return { b2Enabled: false };
+            }
+        })();
+    }
+    return await serverConfigPromise;
+}
+
 // دالة توليد hash مبسط (SHA-256)
 async function generateHash(fileArrayBuffer){
     const hashBuffer = await crypto.subtle.digest('SHA-256', fileArrayBuffer);
@@ -188,14 +205,17 @@ async function generateQRDataUrl(text, size){
 })();
 
 // ختم PDF (بصمة ورمز QR)
-async function stampPDF(pdfBytes, hash){
+async function stampPDF(pdfBytes, hash, qrTextOverride){
     const pdfDoc = await PDFLib.PDFDocument.load(pdfBytes);
     const pages = pdfDoc.getPages();
     pdfDoc.registerFontkit(fontkit);
     const font = await pdfDoc.embedFont(await getArabicFontBytes(), { subset: true });
-    // توليد QR يشير مباشرة لعرض الملف على الخادم
-    const qrBase = (API_BASE && API_BASE.length) ? API_BASE : window.location.origin;
-    const qrText = qrBase + '/file?hash=' + hash;
+    // نص QR المطلوب تضمينه
+    let qrText = qrTextOverride;
+    if (!qrText) {
+        const qrBase = (API_BASE && API_BASE.length) ? API_BASE : window.location.origin;
+        qrText = qrBase + '/file?hash=' + hash;
+    }
     const qrDataUrl = await generateQRDataUrl(qrText, 100);
     let qrImage;
     if (qrDataUrl.startsWith('data:image/png')) {
@@ -216,11 +236,12 @@ async function stampPDF(pdfBytes, hash){
 }
 
 // رفع الملف المختوم كاملاً إلى الخادم
-async function uploadStamped(blob, originalName, hash){
+async function uploadStamped(blob, originalName, hash, targetName){
     const form = new FormData();
     const stampedFile = new File([blob], 'original-'+originalName, { type: 'application/pdf' });
     form.append('file', stampedFile);
     form.append('hash', hash);
+    if (targetName) form.append('targetName', targetName);
     let res;
     try {
         res = await fetch((API_BASE || '') + '/upload', { method: 'POST', body: form });
@@ -241,8 +262,15 @@ $('#processBtn').addEventListener('click', async ()=>{
     const file = fileInput.files[0];
     const arrayBuffer = await file.arrayBuffer();
     const hash = await generateHash(arrayBuffer);
+    const cfg = await getServerConfig();
+    const targetName = 'original-' + file.name;
+    let qrB2Url = '';
+    if (cfg && cfg.b2Enabled && cfg.b2PublicBaseUrl && cfg.b2BucketName) {
+        // يجب ترميز اسم الملف في الرابط
+        qrB2Url = cfg.b2PublicBaseUrl.replace(/\/$/, '') + '/file/' + encodeURIComponent(cfg.b2BucketName) + '/' + encodeURIComponent(targetName);
+    }
 
-    const stampedBytes = await stampPDF(arrayBuffer, hash);
+    const stampedBytes = await stampPDF(arrayBuffer, hash, qrB2Url || null);
     const blob = new Blob([stampedBytes], {type:'application/pdf'});
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -257,7 +285,7 @@ $('#processBtn').addEventListener('click', async ()=>{
     // رفع النسخة الأصلية المختومة كاملةً
     log('⬆️ جاري رفع النسخة الأصلية إلى الخادم...');
     try {
-        const result = await uploadStamped(blob, file.name, hash);
+        const result = await uploadStamped(blob, file.name, hash, targetName);
         log('✅ تم رفع الملف كاملاً: ' + result.fileName);
         if (result.path) {
             const view = document.createElement('a');
@@ -267,9 +295,15 @@ $('#processBtn').addEventListener('click', async ()=>{
             $('#log').appendChild(document.createElement('br'));
             $('#log').appendChild(view);
         }
-        // بعد نجاح الرفع، حدِّث الـ QR ليشير إلى الملف على الخادم
-        const qrBase = (API_BASE && API_BASE.length) ? API_BASE : window.location.origin;
-        renderQR(qrBase + '/file?hash=' + hash);
+        // بعد نجاح الرفع، حدِّث الـ QR ليشير مباشرةً إلى Backblaze إن توفر
+        if (result.fileUrl) {
+            renderQR(result.fileUrl);
+        } else if (qrB2Url) {
+            renderQR(qrB2Url);
+        } else {
+            const qrBase = (API_BASE && API_BASE.length) ? API_BASE : window.location.origin;
+            renderQR(qrBase + '/file?hash=' + hash);
+        }
     } catch(e){
         log('❌ فشل رفع الملف: ' + (e && e.message ? e.message : e));
     }
@@ -279,9 +313,9 @@ $('#processBtn').addEventListener('click', async ()=>{
     const pages = clientPdfDoc.getPages();
     clientPdfDoc.registerFontkit(fontkit);
     const font = await clientPdfDoc.embedFont(await getArabicFontBytes(), { subset: true });
-    // تضمين QR داخل نسخة العميل أيضًا
+    // تضمين QR داخل نسخة العميل أيضًا (يفضل رابط B2 إن توفر)
     const qrBaseClient = (API_BASE && API_BASE.length) ? API_BASE : window.location.origin;
-    const qrTextClient = qrBaseClient + '/file?hash=' + hash;
+    const qrTextClient = qrB2Url || (qrBaseClient + '/file?hash=' + hash);
     const qrDataUrlClient = await generateQRDataUrl(qrTextClient, 90);
     let qrImageClient;
     if (qrDataUrlClient.startsWith('data:image/png')) {
