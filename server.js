@@ -1,12 +1,13 @@
 const express = require('express');
 const multer = require('multer');
 const path = require('path');
+const os = require('os');
 const fs = require('fs');
 // Load environment variables from .env if present
 try { require('dotenv').config(); } catch(_) {}
 const B2 = require('backblaze-b2');
 const app = express();
-const port = 3000;
+const port = process.env.PORT ? Number(process.env.PORT) : 3000;
 
 // Basic CORS for cross-origin requests
 app.use((req, res, next) => {
@@ -22,11 +23,18 @@ app.use((req, res, next) => {
 // static files (serve index.html and assets)
 app.use(express.static(__dirname));
 
-// ensure uploads directory exists
-const uploadsDirPath = path.join(__dirname, 'uploads');
+// ensure uploads directory exists (use tmp in prod-like envs where code dir may be read-only)
+const uploadsDirPath = process.env.UPLOADS_DIR
+  ? path.resolve(process.env.UPLOADS_DIR)
+  : (process.env.NODE_ENV === 'production'
+      ? path.join(os.tmpdir(), 'uploads')
+      : path.join(__dirname, 'uploads'));
 if (!fs.existsSync(uploadsDirPath)) {
   fs.mkdirSync(uploadsDirPath, { recursive: true });
 }
+
+// serve uploads directory regardless of where it lives
+app.use('/uploads', express.static(uploadsDirPath));
 
 // Multer storage config to save the entire file
 const storage = multer.diskStorage({
@@ -39,6 +47,15 @@ const storage = multer.diskStorage({
   }
 });
 const upload = multer({ storage });
+
+// Multer error handler to avoid generic 500s
+function multerErrorHandler(err, req, res, next){
+  if (err instanceof multer.MulterError) {
+    return res.status(400).json({ ok: false, message: `Multer error: ${err.code}` });
+  }
+  next(err);
+}
+app.use(multerErrorHandler);
 
 // إعداد Backblaze B2
 const b2KeyId = process.env.B2_APPLICATION_KEY_ID || process.env.B2_KEY_ID;
