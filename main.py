@@ -1,7 +1,10 @@
 import os
 import uuid
 from pathlib import Path
-from typing import Tuple
+from typing import Tuple, Dict, List, Optional
+from datetime import datetime, timezone
+
+from pydantic import BaseModel, Field
 
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
@@ -24,6 +27,162 @@ app = FastAPI(title="PDF Uploader with QR Stamp", version="1.0.0")
 # Mount static serving for processed PDFs
 app.mount("/files", StaticFiles(directory=str(OUTPUT_DIR)), name="files")
 
+
+# =========================
+# Commission domain models
+# =========================
+
+class EmployeeIn(BaseModel):
+    name: str = Field(min_length=1)
+    commission_rate: float = Field(
+        ge=0.0, le=1.0, description="Commission rate as a fraction (e.g., 0.1 for 10%)"
+    )
+
+
+class Employee(BaseModel):
+    id: str
+    name: str
+    commission_rate: float
+    created_at: datetime
+
+
+class TransactionIn(BaseModel):
+    amount: float = Field(gt=0.0)
+    brought_by_employee_id: str = Field(description="Employee ID who brought the transaction")
+    note: Optional[str] = None
+
+
+class Transaction(BaseModel):
+    id: str
+    amount: float
+    brought_by_employee_id: str
+    created_at: datetime
+    note: Optional[str] = None
+
+
+employees_store: Dict[str, Employee] = {}
+transactions_store: Dict[str, Transaction] = {}
+
+
+def _now_utc() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _calculate_commission(tx: Transaction) -> float:
+    employee = employees_store.get(tx.brought_by_employee_id)
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found for this transaction")
+    return round(tx.amount * employee.commission_rate, 2)
+
+
+@app.post("/employees", response_model=Employee)
+async def create_employee(employee_in: EmployeeIn) -> Employee:
+    """Create a new employee with a commission rate."""
+    employee_id = uuid.uuid4().hex
+    employee = Employee(
+        id=employee_id,
+        name=employee_in.name,
+        commission_rate=employee_in.commission_rate,
+        created_at=_now_utc(),
+    )
+    employees_store[employee_id] = employee
+    return employee
+
+
+@app.get("/employees", response_model=List[Employee])
+async def list_employees() -> List[Employee]:
+    return list(employees_store.values())
+
+
+@app.get("/employees/{employee_id}", response_model=Employee)
+async def get_employee(employee_id: str) -> Employee:
+    employee = employees_store.get(employee_id)
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    return employee
+
+
+class EmployeeUpdate(BaseModel):
+    name: Optional[str] = None
+    commission_rate: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+
+
+@app.patch("/employees/{employee_id}", response_model=Employee)
+async def update_employee(employee_id: str, update: EmployeeUpdate) -> Employee:
+    employee = employees_store.get(employee_id)
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    if update.name is not None:
+        employee.name = update.name
+    if update.commission_rate is not None:
+        employee.commission_rate = update.commission_rate
+    employees_store[employee_id] = employee
+    return employee
+
+
+@app.post("/transactions", response_model=Transaction)
+async def create_transaction(tx_in: TransactionIn) -> Transaction:
+    if tx_in.brought_by_employee_id not in employees_store:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    tx_id = uuid.uuid4().hex
+    tx = Transaction(
+        id=tx_id,
+        amount=tx_in.amount,
+        brought_by_employee_id=tx_in.brought_by_employee_id,
+        created_at=_now_utc(),
+        note=tx_in.note,
+    )
+    transactions_store[tx_id] = tx
+    return tx
+
+
+@app.get("/transactions", response_model=List[Transaction])
+async def list_transactions() -> List[Transaction]:
+    return list(transactions_store.values())
+
+
+@app.get("/transactions/{transaction_id}", response_model=Transaction)
+async def get_transaction(transaction_id: str) -> Transaction:
+    tx = transactions_store.get(transaction_id)
+    if not tx:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    return tx
+
+
+class TransactionWithCommission(Transaction):
+    commission_amount: float
+
+
+@app.get("/transactions/{transaction_id}/commission", response_model=TransactionWithCommission)
+async def get_transaction_commission(transaction_id: str) -> TransactionWithCommission:
+    tx = transactions_store.get(transaction_id)
+    if not tx:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    commission_value = _calculate_commission(tx)
+    return TransactionWithCommission(**tx.dict(), commission_amount=commission_value)
+
+
+class EmployeeCommissionSummary(BaseModel):
+    employee: Employee
+    total_transactions: int
+    total_amount: float
+    total_commission: float
+
+
+@app.get("/employees/{employee_id}/commission-summary", response_model=EmployeeCommissionSummary)
+async def employee_commission_summary(employee_id: str) -> EmployeeCommissionSummary:
+    employee = employees_store.get(employee_id)
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    employee_transactions = [t for t in transactions_store.values() if t.brought_by_employee_id == employee_id]
+    total_amount = round(sum(t.amount for t in employee_transactions), 2)
+    total_commission = round(sum(_calculate_commission(t) for t in employee_transactions), 2)
+    return EmployeeCommissionSummary(
+        employee=employee,
+        total_transactions=len(employee_transactions),
+        total_amount=total_amount,
+        total_commission=total_commission,
+    )
 
 def _save_upload_to_disk(upload: UploadFile) -> Path:
     """Persist uploaded file to disk with a unique name and return path."""
