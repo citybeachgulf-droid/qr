@@ -174,8 +174,14 @@ app.post('/upload', upload.single('file'), async (req, res) => {
       });
 
       // Build a public B2 URL and ensure proper encoding
+      // Important: Preserve path separators in targetName (encode each segment, not the '/')
       const base = (cfg.publicBaseUrl || '').replace(/\/$/, '');
-      const fileUrl = `${base}/file/${encodeURIComponent(cfg.bucketName)}/${encodeURIComponent(targetName)}`;
+      const safeBucket = encodeURIComponent(cfg.bucketName);
+      const safePath = String(targetName)
+        .split('/')
+        .map(seg => encodeURIComponent(seg))
+        .join('/');
+      const fileUrl = `${base}/file/${safeBucket}/${safePath}`;
 
       // سجل الملف في قاعدة البيانات المؤقتة باستخدام الهاش
       reports[hash] = {
