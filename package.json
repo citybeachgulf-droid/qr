@@ -13,6 +13,7 @@
   "dependencies": {
     "backblaze-b2": "^1.7.1",
     "express": "^5.1.0",
-    "multer": "^2.0.2"
+    "multer": "^2.0.2",
+    "dotenv": "^16.4.5"
   }
 }

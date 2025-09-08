@@ -2,6 +2,8 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+// Load environment variables from .env if present
+try { require('dotenv').config(); } catch(_) {}
 const B2 = require('backblaze-b2');
 const app = express();
 const port = 3000;
@@ -64,13 +66,31 @@ async function ensureB2Ready(){
     let bucketId = b2BucketIdEnv;
     let bucketName = b2BucketNameEnv;
     if (!bucketId || !bucketName) {
-      const list = await b2.listBuckets({ accountId: auth.data.accountId });
-      const buckets = (list && list.data && list.data.buckets) || [];
       let found;
-      if (bucketId) {
-        found = buckets.find(b => b.bucketId === bucketId);
-      } else if (bucketName) {
-        found = buckets.find(b => b.bucketName === bucketName);
+      // Try listBuckets (works with master key). If it fails (restricted key), fall back to getBucket
+      try {
+        const list = await b2.listBuckets({ accountId: auth.data.accountId });
+        const buckets = (list && list.data && list.data.buckets) || [];
+        if (bucketId) {
+          found = buckets.find(b => b.bucketId === bucketId);
+        } else if (bucketName) {
+          found = buckets.find(b => b.bucketName === bucketName);
+        }
+      } catch (listErr) {
+        // ignore, will try getBucket fallback below
+      }
+      if (!found) {
+        try {
+          if (bucketId) {
+            const gb = await b2.getBucket({ bucketId });
+            found = gb && gb.data ? gb.data : null;
+          } else if (bucketName) {
+            const gb = await b2.getBucket({ bucketName });
+            found = gb && gb.data ? gb.data : null;
+          }
+        } catch (gbErr) {
+          // no-op, handled below
+        }
       }
       if (!found) throw new Error('B2 bucket غير موجود. تحقق من B2_BUCKET_ID/B2_BUCKET_NAME');
       bucketId = found.bucketId;
@@ -81,7 +101,12 @@ async function ensureB2Ready(){
     b2Config = { enabled: true, bucketId, bucketName, publicBaseUrl };
     return b2Config;
   })().catch(err => {
-    console.error('B2 init error:', err && err.message ? err.message : err);
+    try {
+      const extra = err && err.response && err.response.data ? JSON.stringify(err.response.data) : '';
+      console.error('B2 init error:', err && err.message ? err.message : err, extra);
+    } catch(_) {
+      console.error('B2 init error:', err && err.message ? err.message : err);
+    }
     b2Config.enabled = false;
     return b2Config;
   });
@@ -154,13 +179,20 @@ app.post('/upload', upload.single('file'), async (req, res) => {
           data: body,
           mime: 'application/pdf'
         });
-        fileUrl = `${cfg.publicBaseUrl}/file/${cfg.bucketName}/${targetName}`;
+        // Build a public B2 URL and ensure proper encoding
+        const base = (cfg.publicBaseUrl || '').replace(/\/$/, '');
+        fileUrl = `${base}/file/${encodeURIComponent(cfg.bucketName)}/${encodeURIComponent(targetName)}`;
         if (providedHash && reports[providedHash]) {
           reports[providedHash].b2Name = targetName;
           reports[providedHash].fileUrl = fileUrl;
         }
       } catch (e) {
-        console.error('B2 upload error:', e && e.message ? e.message : e);
+        try {
+          const extra = e && e.response && e.response.data ? JSON.stringify(e.response.data) : '';
+          console.error('B2 upload error:', e && e.message ? e.message : e, extra);
+        } catch(_) {
+          console.error('B2 upload error:', e && e.message ? e.message : e);
+        }
       }
     }
 
