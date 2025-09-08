@@ -1,6 +1,8 @@
 const express = require('express');
 const multer = require('multer');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 // Load environment variables from .env if present
 try { require('dotenv').config(); } catch(_) {}
 const B2 = require('backblaze-b2');
@@ -20,6 +22,8 @@ app.use((req, res, next) => {
 
 // static files (serve index.html and assets)
 app.use(express.static(__dirname));
+// also serve uploads directory directly
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Multer in-memory storage (no disk writes)
 const upload = multer({ storage: multer.memoryStorage() });
@@ -148,16 +152,46 @@ app.post('/upload', upload.single('file'), async (req, res) => {
     }
 
     const cfg = await ensureB2Ready();
-    if (!cfg.enabled) {
-      return res.status(500).json({ ok: false, message: 'خدمة التخزين غير مهيأة. يرجى ضبط متغيرات البيئة لـ Backblaze B2.' });
-    }
-
     const providedHash = req.body && req.body.hash ? String(req.body.hash) : undefined;
     const computedHash = crypto.createHash('sha256').update(req.file.buffer).digest('hex');
     const hash = providedHash || computedHash;
     const originalName = req.file.originalname || 'file';
     const targetName = req.body && req.body.targetName ? String(req.body.targetName) : originalName;
     const mimeType = req.file.mimetype || 'application/octet-stream';
+
+    // Local filesystem fallback when B2 is not enabled
+    if (!cfg.enabled) {
+      try {
+        const uploadsRoot = path.join(__dirname, 'uploads');
+        // sanitize and preserve subdirectories without allowing traversal
+        const safeSegments = String(targetName)
+          .split('/')
+          .filter(seg => seg && seg !== '.' && seg !== '..');
+        const safeRelativePath = safeSegments.join('/');
+        const fullPath = path.join(uploadsRoot, safeRelativePath);
+        const fullPathResolved = path.resolve(fullPath);
+        const uploadsRootResolved = path.resolve(uploadsRoot);
+        if (!fullPathResolved.startsWith(uploadsRootResolved)) {
+          return res.status(400).json({ ok: false, message: 'اسم الملف غير صالح' });
+        }
+        await fs.promises.mkdir(path.dirname(fullPathResolved), { recursive: true });
+        await fs.promises.writeFile(fullPathResolved, req.file.buffer);
+        const relPath = '/' + path.relative(__dirname, fullPathResolved).replace(/\\/g, '/');
+        const fileUrl = `${req.protocol}://${req.get('host')}${relPath}`;
+
+        reports[hash] = {
+          fileName: targetName,
+          status: 'أصلي',
+          fileUrl,
+          mimeType
+        };
+
+        return res.json({ ok: true, hash, fileName: targetName, fileUrl, mimeType, path: relPath, size: req.file.size || undefined });
+      } catch (localErr) {
+        console.error('Local upload error:', localErr && localErr.message ? localErr.message : localErr);
+        return res.status(500).json({ ok: false, message: 'تعذر حفظ الملف محليًا' });
+      }
+    }
 
     try {
       // احصل على عنوان الرفع
