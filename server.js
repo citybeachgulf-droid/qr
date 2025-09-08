@@ -1,8 +1,6 @@
 const express = require('express');
 const multer = require('multer');
-const path = require('path');
-const os = require('os');
-const fs = require('fs');
+const crypto = require('crypto');
 // Load environment variables from .env if present
 try { require('dotenv').config(); } catch(_) {}
 const B2 = require('backblaze-b2');
@@ -23,30 +21,8 @@ app.use((req, res, next) => {
 // static files (serve index.html and assets)
 app.use(express.static(__dirname));
 
-// ensure uploads directory exists (use tmp in prod-like envs where code dir may be read-only)
-const uploadsDirPath = process.env.UPLOADS_DIR
-  ? path.resolve(process.env.UPLOADS_DIR)
-  : (process.env.NODE_ENV === 'production'
-      ? path.join(os.tmpdir(), 'uploads')
-      : path.join(__dirname, 'uploads'));
-if (!fs.existsSync(uploadsDirPath)) {
-  fs.mkdirSync(uploadsDirPath, { recursive: true });
-}
-
-// serve uploads directory regardless of where it lives
-app.use('/uploads', express.static(uploadsDirPath));
-
-// Multer storage config to save the entire file
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, uploadsDirPath);
-  },
-  filename: function (req, file, cb) {
-    // keep original filename or use provided name
-    cb(null, file.originalname);
-  }
-});
-const upload = multer({ storage });
+// Multer in-memory storage (no disk writes)
+const upload = multer({ storage: multer.memoryStorage() });
 
 // Multer error handler to avoid generic 500s
 function multerErrorHandler(err, req, res, next){
@@ -58,7 +34,9 @@ function multerErrorHandler(err, req, res, next){
 app.use(multerErrorHandler);
 
 // إعداد Backblaze B2
-const b2KeyId = process.env.B2_APPLICATION_KEY_ID || process.env.B2_KEY_ID;
+// Render envs expected: B2_ACCOUNT_ID, B2_APPLICATION_KEY, B2_BUCKET_ID, B2_BUCKET_NAME
+// Fallbacks kept for compatibility with older naming
+const b2KeyId = process.env.B2_ACCOUNT_ID || process.env.B2_APPLICATION_KEY_ID || process.env.B2_KEY_ID;
 const b2AppKey = process.env.B2_APPLICATION_KEY || process.env.B2_APP_KEY;
 const b2BucketIdEnv = process.env.B2_BUCKET_ID || '';
 const b2BucketNameEnv = process.env.B2_BUCKET_NAME || '';
@@ -169,51 +147,54 @@ app.post('/upload', upload.single('file'), async (req, res) => {
       return res.status(400).json({ ok: false, message: 'لم يتم إرسال ملف' });
     }
 
-    const providedHash = req.body && req.body.hash ? String(req.body.hash) : undefined;
-    const savedFileName = req.file.filename;
-    const targetName = req.body && req.body.targetName ? String(req.body.targetName) : savedFileName;
-
-    // اختياري: سجل الملف في قاعدة البيانات المؤقتة باستخدام الهاش
-    if (providedHash) {
-      reports[providedHash] = { fileName: savedFileName, status: 'أصلي' };
-    }
-
-    // محاولة رفع الملف إلى B2 إن كان مفعّلًا
-    let fileUrl;
     const cfg = await ensureB2Ready();
-    if (cfg.enabled) {
-      try {
-        // احصل على عنوان الرفع
-        const uploadUrlResp = await b2.getUploadUrl({ bucketId: cfg.bucketId });
-        const uploadUrl = uploadUrlResp.data.uploadUrl;
-        const uploadAuthToken = uploadUrlResp.data.authorizationToken;
-        const fullPath = path.join(uploadsDirPath, savedFileName);
-        const body = fs.readFileSync(fullPath);
-        await b2.uploadFile({
-          uploadUrl,
-          uploadAuthToken,
-          fileName: targetName,
-          data: body,
-          mime: 'application/pdf'
-        });
-        // Build a public B2 URL and ensure proper encoding
-        const base = (cfg.publicBaseUrl || '').replace(/\/$/, '');
-        fileUrl = `${base}/file/${encodeURIComponent(cfg.bucketName)}/${encodeURIComponent(targetName)}`;
-        if (providedHash && reports[providedHash]) {
-          reports[providedHash].b2Name = targetName;
-          reports[providedHash].fileUrl = fileUrl;
-        }
-      } catch (e) {
-        try {
-          const extra = e && e.response && e.response.data ? JSON.stringify(e.response.data) : '';
-          console.error('B2 upload error:', e && e.message ? e.message : e, extra);
-        } catch(_) {
-          console.error('B2 upload error:', e && e.message ? e.message : e);
-        }
-      }
+    if (!cfg.enabled) {
+      return res.status(500).json({ ok: false, message: 'خدمة التخزين غير مهيأة. يرجى ضبط متغيرات البيئة لـ Backblaze B2.' });
     }
 
-    return res.json({ ok: true, fileName: savedFileName, path: `/uploads/${savedFileName}`, fileUrl });
+    const providedHash = req.body && req.body.hash ? String(req.body.hash) : undefined;
+    const computedHash = crypto.createHash('sha256').update(req.file.buffer).digest('hex');
+    const hash = providedHash || computedHash;
+    const originalName = req.file.originalname || 'file';
+    const targetName = req.body && req.body.targetName ? String(req.body.targetName) : originalName;
+    const mimeType = req.file.mimetype || 'application/octet-stream';
+
+    try {
+      // احصل على عنوان الرفع
+      const uploadUrlResp = await b2.getUploadUrl({ bucketId: cfg.bucketId });
+      const uploadUrl = uploadUrlResp.data.uploadUrl;
+      const uploadAuthToken = uploadUrlResp.data.authorizationToken;
+
+      await b2.uploadFile({
+        uploadUrl,
+        uploadAuthToken,
+        fileName: targetName,
+        data: req.file.buffer,
+        mime: mimeType
+      });
+
+      // Build a public B2 URL and ensure proper encoding
+      const base = (cfg.publicBaseUrl || '').replace(/\/$/, '');
+      const fileUrl = `${base}/file/${encodeURIComponent(cfg.bucketName)}/${encodeURIComponent(targetName)}`;
+
+      // سجل الملف في قاعدة البيانات المؤقتة باستخدام الهاش
+      reports[hash] = {
+        fileName: targetName,
+        status: 'أصلي',
+        fileUrl,
+        mimeType
+      };
+
+      return res.json({ ok: true, hash, fileName: targetName, fileUrl, mimeType, size: req.file.size || undefined });
+    } catch (e) {
+      try {
+        const extra = e && e.response && e.response.data ? JSON.stringify(e.response.data) : '';
+        console.error('B2 upload error:', e && e.message ? e.message : e, extra);
+      } catch(_) {
+        console.error('B2 upload error:', e && e.message ? e.message : e);
+      }
+      return res.status(502).json({ ok: false, message: 'تعذر رفع الملف إلى Backblaze B2' });
+    }
   } catch (error) {
     console.error('Upload error:', error);
     return res.status(500).json({ ok: false, message: 'خطأ أثناء الرفع' });
@@ -228,21 +209,21 @@ app.get('/file', (req, res) => {
     return res.status(400).send('❌ لا يوجد hash');
   }
   const report = reports[hash];
-  if (!report) {
+  if (!report || !report.fileUrl) {
     return res.status(404).send('❌ لم يتم العثور على ملف مرتبط بهذا الهاش');
   }
-  if (report.fileUrl) {
-    // إعادة توجيه إلى Backblaze إن وُجد رابط عام
-    return res.redirect(302, report.fileUrl);
-  }
-  const filePath = path.join(uploadsDirPath, report.fileName);
-  if (!fs.existsSync(filePath)) {
-    return res.status(404).send('❌ الملف غير موجود على الخادم');
-  }
-  res.setHeader('Content-Type', 'application/pdf');
-  // inline العرض داخل المتصفح
-  res.setHeader('Content-Disposition', `inline; filename="${report.fileName}"`);
-  fs.createReadStream(filePath).pipe(res);
+  // إعادة توجيه إلى Backblaze عبر الرابط المباشر
+  return res.redirect(302, report.fileUrl);
+});
+
+// معالج أخطاء عام لضمان رسائل واضحة وعدم إرجاع 500 غير مفسرة
+app.use((err, req, res, next) => {
+  try {
+    const msg = err && err.message ? err.message : 'خطأ غير متوقع';
+    console.error('Unhandled error:', msg);
+  } catch(_) {}
+  if (res.headersSent) return next(err);
+  return res.status(500).json({ ok: false, message: 'حدث خطأ غير متوقع. الرجاء المحاولة لاحقًا.' });
 });
 
 app.listen(port, () => console.log(`Server running at http://localhost:${port}`));
